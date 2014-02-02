@@ -88,10 +88,10 @@ class OBJECT_OT_smoke2cycles(bpy.types.Operator):
             'ff': ims.file_format,
             'ec': ims.exr_codec,
             'cd': ims.color_depth,
-			'fp': scn.render.filepath,
-			'rp': scn.render.resolution_percentage,
-			'rx': scn.render.resolution_x,
-			'ry': scn.render.resolution_y
+            'fp': scn.render.filepath,
+            'rp': scn.render.resolution_percentage,
+            'rx': scn.render.resolution_x,
+            'ry': scn.render.resolution_y
         }
          
         try:
@@ -126,8 +126,6 @@ class OBJECT_OT_smoke2cycles(bpy.types.Operator):
                 # save texture
                 name = "%s_%03d.exr" % (os.path.split(name)[1], frm)
                 i1.save_render(os.path.join(scn.render.filepath, name))
-                #i1.filepath_raw=os.path.join(scn.render.filepath, name)
-                #i1.save()
             finally:
                 bpy.data.images.remove(i1)
         finally:
@@ -317,7 +315,7 @@ class VIEW3D_PT_Smoke2Cycles(bpy.types.Panel):
             layout.operator("OBJECT_OT_smoke2cycles")
         else:
             layout.label(text="Please select a smoke domain", icon='INFO')
-		
+        
     
 def register():
     bpy.utils.register_class(Smoke2CylcesDomainSettings)

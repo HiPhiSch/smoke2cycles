@@ -198,6 +198,7 @@ class SmokeExporter(object):
             self.__frame = frame
             self.__maxres = domain.resolution_max
             self.__domain = domain
+            self.__domain_obj_name = domain_obj.name
         
             # smoke file    
             self.__pcache = None
@@ -354,9 +355,10 @@ class SmokeExporter(object):
         # determine binary file name
         cachefilepath = os.path.join(
             os.path.splitext(os.path.dirname(bpy.data.filepath))[0],
-    		    "blendcache_" + os.path.splitext(os.path.basename(bpy.data.filepath))[0]
+                "blendcache_" + os.path.splitext(os.path.basename(bpy.data.filepath))[0]
         )
-        cachefilename = smokecache.name+"_%06d_%02d.bphys" % (self.__frame,smokecache.index)
+        prefix = smokecache.name if (smokecache.name != "") else "".join(["%02X" % ci for ci in self.__domain_obj_name.encode("utf-8")])
+        cachefilename = prefix+"_%06d_%02d.bphys" % (self.__frame,smokecache.index)
         fullpath = os.path.join( cachefilepath, cachefilename )
 
         # open file
