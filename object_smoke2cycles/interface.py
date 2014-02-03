@@ -36,7 +36,7 @@ class Smoke2CylcesDomainSettings(bpy.types.PropertyGroup):
     cycles_domain_obj = bpy.props.StringProperty(name="Cycles Domain Object") 
     cycles_material = bpy.props.StringProperty(name="Cycles Material")
     texture_filename_base = bpy.props.StringProperty(name="Filename Base",
-        description="Filename base for texture export, frame and .exr are attached automatically")    
+        description="Filename base for texture export, frame and .exr are attached automatically", subtype='FILE_PATH')    
     
 class Smoke2CyclesOperatorSettings(bpy.types.PropertyGroup):
     """Smoke2Cycles addon settings for the operator"""
@@ -46,13 +46,13 @@ class Smoke2CyclesOperatorSettings(bpy.types.PropertyGroup):
         description="Export the required texture", default=True)
     texture_filename_base = bpy.props.StringProperty(name="Filename Base",
         description="Filename base for texture export, frame and .exr are attached automatically",
-        default = "//smoke_export")
+        default = "//smoke_export", subtype='FILE_PATH')
     create_material = bpy.props.BoolProperty(name="Create Material",
         description="Create the required cycles material", default=True)
     material_type = bpy.props.EnumProperty(name="Material type",
         description = "Select the cycles material for generation", 
         items=[('FIRE', "Fire", "only fire") ,('SMOKE', "Smoke", "only smoke"), ('SMOKE_FIRE', "Smoke + Fire", "smoke and fire")],
-        default='FIRE')        
+        default='SMOKE_FIRE')        
     create_domain_cube = bpy.props.BoolProperty(name="Create Domain Cube",
         description="Create the required cycles material", default=True)
     domain_cube_layer = bpy.props.IntProperty(name="Cycles Domain Cube Layer",
@@ -199,9 +199,6 @@ class OBJECT_OT_smoke2cycles(bpy.types.Operator):
             # transform domain cube to adapt to domain
             if stg.create_domain_cube: 
                 c_dom.matrix_world = sm_exp.adaptive_bbox_wm
-                if stg.create_material:
-                    if "S2C_COORD_MAPPER" in c_mat.node_tree.nodes:
-                        c_mat.node_tree.nodes["S2C_COORD_MAPPER"].scale = sm_exp.adaptive_bbox_inv_scale
             
             # adapt material
             if stg.create_material:
@@ -236,15 +233,12 @@ class OBJECT_OT_smoke2cycles(bpy.types.Operator):
                     
                 # update material
                 if not c_mat is None:
-                    nodes = c_mat.node_tree.nodes                    
-                    if "S2C_COORD_MAPPER" in nodes:
-                        nodes["S2C_COORD_MAPPER"].keyframe_insert("scale", frame=frm, group="s2c_mat")
-                    
+                    nodes = c_mat.node_tree.nodes                                        
                     if "S2C_IMPORT_SCRIPT" in nodes:                        
                         n = nodes["S2C_IMPORT_SCRIPT"]
                         if "CurrentFrame" in n.inputs:
                             n.inputs["CurrentFrame"].keyframe_insert("default_value", frame=frm, group="s2c_mat")
-                        if "Division" in n.inputs:
+                        if "Divisions" in n.inputs:
                             n.inputs["Divisions"].keyframe_insert("default_value", frame=frm, group="s2c_mat")                                                            
                 
                               
@@ -274,7 +268,7 @@ class VIEW3D_PT_Smoke2Cycles(bpy.types.Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'TOOLS'
     bl_context = "objectmode"
-    bl_category = "Smoke2Cycles"
+    bl_category = "Physics"
         
     @classmethod
     def poll(cls, context):

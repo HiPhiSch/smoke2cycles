@@ -300,14 +300,18 @@ class SmokeExporter(object):
                               
         return result
 
-    def __pcache_skip_part(self):
+    def __pcache_skip_part(self, use_high_res=False):
         """skip over one entry"""
+        if use_high_res:
+            cell_count = self.__cell_count_high
+        else:
+            cell_count = self.__cell_count
         # read compression header
         comp_header = self.__pcache_read_compression_header()
 
         if comp_header["compression"] is None:
             # skip uncompressed data
-            self.__pcache.seek(self.__cell_count * ct.sizeof(ct.c_float), 1)
+            self.__pcache.seek(cell_count * ct.sizeof(ct.c_float), 1)
         else:
             # skip compressed datax
             self.__pcache.seek(comp_header["comp_size"], 1)
@@ -316,10 +320,10 @@ class SmokeExporter(object):
                 prop_size = struct.unpack("I", self.__pcache.read(4))[0]
                 self.__pcache.seek(prop_size, 1)
     
-    def __pcache_read_part(self, is_smoke=True):
+    def __pcache_read_part(self, use_high_res=False):
         """read one entry"""
         # smoke/fire -> switch to high res if required
-        if is_smoke:
+        if use_high_res:
             cell_count = self.__cell_count_high
         else:
             cell_count = self.__cell_count
@@ -329,7 +333,7 @@ class SmokeExporter(object):
         if comp_header["compression"] is None:
             # read uncompressed data
             return struct.unpack("%df" % self.__cell_count, \
-                self.__pcache.read( self.__cell_count * ct.sizeof(ct.c_float) ) )
+                self.__pcache.read( cell_count * ct.sizeof(ct.c_float) ) )
         
         # read compressed data
         compressed = self.__pcache.read(comp_header["comp_size"])
@@ -345,7 +349,13 @@ class SmokeExporter(object):
             compressed, cell_count, comp_header["compression"], optional)
         
     
-    def __extract_pcache(self, header_only=False):        
+    def __extract_pcache(self, header_only=False): 
+        """Extract data from binary pcache file"""
+        SM_ACTIVE_HEAT = (1<<0) 
+        SM_ACTIVE_FIRE = (1<<1)
+        SM_ACTIVE_COLORS = (1<<2)
+        SM_ACTIVE_COLOR_SET	= (1<<3)               
+        
         smokecache = self.__smokecache
         
         # check for bake
@@ -370,10 +380,10 @@ class SmokeExporter(object):
             if read_buffer  != b"BPHYSICS":
                 raise Exception("Wrong header magic!")
                 
-            flags, cell_count = struct.unpack("3I", pcache.read(12))[:2]
+            ptcache_type, cell_count = struct.unpack("3I", pcache.read(12))[:2]
             self.__cell_count = cell_count
-            if not flags in {3,4}:
-                raise Exception("Wrong header flags")
+            if not (ptcache_type & 0xFFFF) in (3,4):
+                raise Exception("Wrong file type")
               
             # version 1.x ?  
             cache_v1 = struct.unpack("4s", pcache.read(4))[0].decode('ASCII')[:2] == "1."
@@ -384,43 +394,98 @@ class SmokeExporter(object):
             self.cache_opt = dict()            
             if cache_v1:
                 cache_opt = dict()
-                cache_opt["fluid_fields"], cache_opt["active_fields"], \
+                cache_opt["cache_fields"], cache_opt["active_fields"], \
                     cache_opt["res_x"], cache_opt["res_y"], cache_opt["res_z"], \
-                    cache_opt["dx"] = struct.unpack("6I", pcache.read(6*4))
+                    cache_opt["res_dx"] = struct.unpack("5If", pcache.read(6*4))                
                 self.__cell_count = cache_opt["res_x"] * \
                     cache_opt["res_y"] * cache_opt["res_z"]
-                self.cache_opt = cache_opt
-            
+                self.cache_opt = cache_opt            
+                            
             # smoke high res?    
             self.__cell_count_high = self.__cell_count
             if self.__is_high_res:
                 self.__cell_count_high *= self.__high_res_amp * \
                     self.__high_res_amp * self.__high_res_amp    
             
+            # old format and not high res        
+            if (not cache_v1) and (ptcache_type & 4 != 0):
+                self.__is_hight_res = False            
+                
+            # no data
+            if self.__cell_count <= 1:
+                self.__is_high_res = False
+            
             if not header_only:        
                 # shadow
                 self.__pcache_skip_part()
                 # density
-                self.__smoke = self.__pcache_read_part()
+                if not self.__is_high_res:
+                    self.__smoke = self.__pcache_read_part()
+                else:
+                    self.__pcache_skip_part()
                 # density old
                 if not cache_v1:
                     self.__pcache_skip_part()
-                # heat
-                self.__pcache_skip_part()
-                # heat old
-                self.__pcache_skip_part()
+                
+                if (not cache_v1) or (cache_opt["cache_fields"] & SM_ACTIVE_HEAT > 0):
+                    # heat
+                    self.__pcache_skip_part()
+                    # heat old
+                    self.__pcache_skip_part()
                 if cache_v1:
-                    # fire                
-                    self.__fire = self.__pcache_read_part()
-                # the rest of the file does not matter here...                                                                 
+                    if cache_opt["cache_fields"] & SM_ACTIVE_FIRE > 0:
+                        # fire                
+                        if not self.__is_high_res:
+                            self.__fire = self.__pcache_read_part()
+                        else:
+                            self.__pcache_skip_part()
+                            
+                        for i in range(2): # fuel and react:
+                            self.__pcache_skip_part()                
+                                        
+                    if cache_opt["cache_fields"] & SM_ACTIVE_COLORS > 0:
+                        # r, g, b
+                        for i in range(3):
+                            self.__pcache_skip_part
+                        
+
+                # high resolution:
+                if self.__is_high_res:
+                    # should be always here but does not matter if not high res:
+                    # -------------
+                    for i in range(3): # vx, vy, vz
+                        self.__pcache_skip_part()
+                    if not cache_v1:
+                        for i in range(3):
+                            self.__pcache_skip_part() # vx, vy, vz (old values)                    
+                    # obstacle
+                    self.__pcache_skip_part()                    
+                    # dx, dt
+                    skip_bytes = 2*ct.sizeof(ct.c_float)
+                    if cache_v1: #p0, p1, dp0, shift, obj_shift_f, obmat, base_res, res min, res max, active color
+                        skip_bytes += (3 + 3 + 3 + 3 + 16 + 3) * ct.sizeof(ct.c_float) # p0, p1, dp0, obj_shift_f, obmat, active_color
+                        skip_bytes += (3 + 3 + 3 + 3) * ct.sizeof(ct.c_uint) # shift, base_res, res min, res max
+                    pcache.seek(skip_bytes, 1) # skip
+                    # --------------------------------
+                    
+                    
+                    # smoke (high res)
+                    self.__smoke = self.__pcache_read_part(use_high_res=True)
+                    # fire (high res)                    
+                    if (cache_v1) and (cache_opt["cache_fields"] & SM_ACTIVE_FIRE > 0):
+                        self.__fire = self.__pcache_read_part(use_high_res=True)
         finally:
             self.__pcache.close() 
 
         if not header_only:    
-            self.__pcache_extracted = True       
+            self.__pcache_extracted = True   
+            # no fire information available?
+            if (not cache_v1) or (cache_opt["cache_fields"] & SM_ACTIVE_FIRE == 0):
+                self.__fire = [0.0] * len(self.__smoke)
                           
 # test functions                            
-if __name__ == "__main__":    
+if __name__ == "__main__":
+    print ("-" * 40)    
     #print(LZx_Reader.platform())        
     #print(list(LZx_Reader.search_path_iter("LZO")))
     #print(list(LZx_Reader.search_path_iter("LZMA")))    
@@ -433,6 +498,6 @@ if __name__ == "__main__":
     smoke_exporter = SmokeExporter(bpy.context.object,
         bpy.context.scene.frame_current)
     print(len(smoke_exporter.fire)**0.33333333)
-    print(smoke_exporter.resolution)
-    print(smoke_exporter.fire)
+    # print(smoke_exporter.resolution)
+    # print(smoke_exporter.fire)
     print(smoke_exporter.cache_opt)

@@ -213,7 +213,6 @@ class Smoke2CyclesImportMaterialGenerator(object):
             # setup input part
             nl = NodeLayouter(n_tr)
             nodes = ["ShaderNodeTexCoord"]
-            nodes.append("ShaderNodeMapping")
             nodes.append("ShaderNodeScript")
             
             # create nodes
@@ -224,10 +223,9 @@ class Smoke2CyclesImportMaterialGenerator(object):
             
             # link nodes           
             n_tr.links.new(input_nodes[0].outputs["Object"], input_nodes[1].inputs["Vector"])
-            n_tr.links.new(input_nodes[1].outputs["Vector"], input_nodes[2].inputs["Vector"])
             
-            input_nodes[1].name = "S2C_COORD_MAPPER"
-            input_nodes[2].name = "S2C_IMPORT_SCRIPT"                        
+            input_nodes[1].name = "S2C_IMPORT_SCRIPT"
+            input_nodes[1].label = "Smoke2Cycles - Import"
             
             # setup converter part
             nodes = [[], []]
@@ -256,11 +254,12 @@ class Smoke2CyclesImportMaterialGenerator(object):
                 n_tr.links.new(input_nodes[-1].outputs["SmokeDensity"], converter_nodes[1][0].inputs[0])
                 
                 sm_dens = converter_nodes[1][0].outputs["Value"]
+                converter_nodes[1][0].label = "Smoke Density Scaler"
                 
             if mat_type in ('FIRE', 'SMOKE_FIRE'):                
                 # setup math node
                 converter_nodes[1][0 + sm_offs[1]].operation = 'MULTIPLY'
-                converter_nodes[1][0 + sm_offs[1]].inputs[1].default_value = 100.0
+                converter_nodes[1][0 + sm_offs[1]].inputs[1].default_value = 5.0
 
                 # load script
                 converter_nodes[0][0 + sm_offs[0]].script = osl_temp_remap
@@ -275,6 +274,9 @@ class Smoke2CyclesImportMaterialGenerator(object):
                 
                 fr_dens = converter_nodes[1][0 + sm_offs[1]].outputs["Value"]
                 fr_color = converter_nodes[1][1 + sm_offs[1]].outputs["Color"]
+                
+                converter_nodes[1][0 + sm_offs[1]].label = "Fire Density Scale"
+                converter_nodes[0][0 + sm_offs[0]].label = "Smoke2Cycles - Temperature Remap"
             
             # setup shader part
             nodes = [[],[]]

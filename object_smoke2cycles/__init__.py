@@ -41,8 +41,8 @@ bl_info = {
     "author": "HiPhiSch",
     "version": (0, 1),
     "blender": (2,69,8),
-    "location": "View3D > Tools > Smoke2Cycles",
-    "warning": "EARLY BETA",
+    "location": "View3D > Tools > Physics > Smoke2Cycles",
+    "warning": "BETA, LIBLZO and LIBLZMA must be PRESENT on MacOS32 and Linux",
     "category": "Object",
     "tracker_url": "https://github.com/HiPhiSch/smoke2cycles/issues"
 }
