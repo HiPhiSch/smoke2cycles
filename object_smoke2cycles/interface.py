@@ -166,17 +166,17 @@ class OBJECT_OT_smoke2cycles(bpy.types.Operator):
                 c_dom = context.object
                 c_dom.name = "CyclesSmokeDom"
                 c_dom.matrix_world = mu.Matrix.Identity(4)
-                
-                # assign the correct material
-                if not c_mat is None:
-                    bpy.ops.object.material_slot_add()
-                    c_dom.material_slots[0].material = c_mat    
-              
+                              
                 stl.cycles_domain_obj = c_dom.name                    
             finally:
                 context.scene.objects.active = ao
-            
-
+                            
+        # assign the correct material
+        if not ((c_mat is None) or (c_dom is None)) :
+            if stg.create_material:
+                bpy.ops.object.material_slot_add()
+                c_dom.material_slots[0].material = c_mat    
+                
         # determine the right texture base filename:
         basename = ""
         if not c_dom is None:

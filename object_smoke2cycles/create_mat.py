@@ -248,7 +248,7 @@ class Smoke2CyclesImportMaterialGenerator(object):
             if mat_type in ('SMOKE', 'SMOKE_FIRE'):
                 # set up math node
                 converter_nodes[1][0].operation = 'MULTIPLY'
-                converter_nodes[1][0].inputs[1].default_value = 3.0
+                converter_nodes[1][0].inputs[1].default_value = 10.0
                 
                 # link node
                 n_tr.links.new(input_nodes[-1].outputs["SmokeDensity"], converter_nodes[1][0].inputs[0])
@@ -303,6 +303,8 @@ class Smoke2CyclesImportMaterialGenerator(object):
                 n_tr.links.new(sm_dens, shader_nodes[0][1].inputs["Density"])  
                 n_tr.links.new(shader_nodes[0][0].outputs["Volume"], shader_nodes[1][0].inputs[0])
                 n_tr.links.new(shader_nodes[0][1].outputs["Volume"], shader_nodes[1][0].inputs[1])
+                
+                shader_nodes[0][1].inputs["Anisotropy"].default_value = 0.85
                 
                 sm_shader = shader_nodes[1][0].outputs["Shader"]
             

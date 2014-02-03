@@ -229,7 +229,7 @@ class SmokeExporter(object):
         # do the magic
         if not self.__pcache_extracted:
             self.__extract_pcache()
-        return self.__smoke
+        return self.__fire
         
     @property
     def adaptive_bbox_wm(self):
