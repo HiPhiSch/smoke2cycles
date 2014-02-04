@@ -39,7 +39,7 @@ bl_info = {
     "name": "Smoke2Cycles",
     "description": "Convert BI smoke/fire simulations into a cycles 2.69.x compatible setup",
     "author": "HiPhiSch",
-    "version": (0, 1),
+    "version": (0, 2),
     "blender": (2,69,8),
     "location": "View3D > Tools > Physics > Smoke2Cycles",
     "warning": "BETA, LIBLZO and LIBLZMA must be PRESENT on MacOS32 and Linux",

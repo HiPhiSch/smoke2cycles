@@ -75,6 +75,9 @@ class OBJECT_OT_smoke2cycles(bpy.types.Operator):
     bl_options = {'UNDO'}
     
     settings_glob = bpy.props.PointerProperty(type=Smoke2CyclesOperatorSettings)
+    current_frame = bpy.props.IntProperty()
+    end_frame = bpy.props.IntProperty()
+    progr = bpy.props.IntProperty()
     
     @classmethod
     def poll(cls, context):
@@ -119,8 +122,6 @@ class OBJECT_OT_smoke2cycles(bpy.types.Operator):
                 pix_arr[1::4] = fire # g
                 pix_arr[3::4] = [1.0] * len(smoke) # alpha
                 
-                print(frm, len(pix_arr), len(i1.pixels), resolution)
-                print(len(fire), len(smoke))
                 i1.pixels[:] = pix_arr
                 
                 # save texture
@@ -137,57 +138,45 @@ class OBJECT_OT_smoke2cycles(bpy.types.Operator):
             scn.render.resolution_x = backup['rx']
             scn.render.resolution_y = backup['ry']
     
-    def execute(self, context):    
+    def cleanup(self, context):
+        """cleanup after operation"""
+        bpy.context.window_manager.progress_end()
+    
+    def modal(self, context, event):
+        """update the individual frames"""
+        # settings
         stg = self.settings_glob
         stl = context.object.smoke2cycles
+
+        # finished?
+        if self.current_frame > self.end_frame:
+            self.cleanup(context)
+            return {'FINISHED'}
         
-        # determine the required frames
-        if stg.current_frame:
-            frames = [context.scene.frame_current]
-        else:
-            frames = range(stg.start_frame, stg.end_frame + 1) 
+        # cancelled?
+        if event.type == 'ESC':
+            self.cleanup(context)
+            return {'CANCELLED'}
         
-        # create the required material
+        # progress update
+        bpy.context.window_manager.progress_update(self.progr) 
+        self.progr += 1
+        
+        # material, domain, and basename from local object
         c_mat = stl.cycles_material
         c_mat = bpy.data.materials[c_mat] if c_mat in bpy.data.materials else None
-        if ((c_mat is None) or (not stg.keep_settings)) and stg.create_material:
-            c_mat = Smoke2CyclesImportMaterialGenerator.generate_material(stg.material_type)
-            stl.cycles_material = c_mat.name
+        c_dom = stl.cycles_domain_obj
+        c_dom = bpy.data.objects[c_dom] if c_dom in bpy.data.objects else None 
+        basename = stl.texture_filename_base
         
-        # generate cycles domain cube if required
-        c_dom = stl.cycles_domain_obj        
-        c_dom = bpy.data.objects[c_dom] if c_dom in bpy.data.objects else None
-        if ((c_dom is None) or (not stg.keep_settings)) and stg.create_domain_cube:
-            ao = context.scene.objects.active
-            try:
-                # create a default cube as domain
-                bpy.ops.mesh.primitive_cube_add(layers= \
-                    tuple([i == stg.domain_cube_layer for i in range(1,21)]) )
-                c_dom = context.object
-                c_dom.name = "CyclesSmokeDom"
-                c_dom.matrix_world = mu.Matrix.Identity(4)
-                              
-                stl.cycles_domain_obj = c_dom.name                    
-            finally:
-                context.scene.objects.active = ao
-                            
-        # assign the correct material
-        if not ((c_mat is None) or (c_dom is None)) :
-            if stg.create_material:
-                bpy.ops.object.material_slot_add()
-                c_dom.material_slots[0].material = c_mat    
-                
-        # determine the right texture base filename:
-        basename = ""
-        if not c_dom is None:
-            basename = stl.texture_filename_base
-        if (not stg.keep_settings) or (basename == ""):
-            basename = stg.texture_filename_base
-            stl.texture_filename_base = basename
-
-        # loop over all frames
-        for frm in frames:
-            print("Smoke2Cycles: parsing frame %d" % frm)
+        # frame to work with
+        frm = self.current_frame
+        self.current_frame += 1
+        
+        # Debug
+        print("Smoke2Cycles: parsing frame %d" % frm)
+        
+        try:
             # create export object
             sm_exp = core.SmokeExporter(context.object, frm)
             
@@ -223,7 +212,7 @@ class OBJECT_OT_smoke2cycles(bpy.types.Operator):
                     if "HighTemp" in n.inputs:
                         n.inputs["HighTemp"].default_value = sm_exp.flame_temp_span[1]         
                         
-            
+            # update the key frames
             if stg.update_key_frames:
                 # update domain cube               
                 if not c_dom is None:
@@ -240,9 +229,85 @@ class OBJECT_OT_smoke2cycles(bpy.types.Operator):
                             n.inputs["CurrentFrame"].keyframe_insert("default_value", frame=frm, group="s2c_mat")
                         if "Divisions" in n.inputs:
                             n.inputs["Divisions"].keyframe_insert("default_value", frame=frm, group="s2c_mat")                                                            
-                
+        
+        except Exception as e:
+            if isinstance(e, core.EUnsuportedPlatform):
+                self.report({'WARNING'}, "Platform not yet supported")
+            elif isinstance(e, core.ELoadCompressionLibraryFailed):
+                self.report({'WARNING'}, "Required compression library could not be found or loaded: {1}".format(e))
+            elif isinstance(e, core.ENoDomain):
+                self.report({'WARNING'}, "Object is not a smoke domain!")
+            elif isinstance(e, core.ENotBaked):
+                self.report({'WARNING'}, "Please bake the smoke physics first!")
+            else:
+                self.report({'WARNING'}, "Unexpected error: {1}".format(e))
+            
+            self.cleanup(context)
+            
+            return {'CANCELLED'}
+
+        return {'RUNNING_MODAL'}
+    
+    def execute(self, context):    
+        """update local settings and initialize"""
+        stg = self.settings_glob
+        stl = context.object.smoke2cycles
+        
+        # determine the required frames
+        if stg.current_frame:
+            self.current_frame = self.end_frame = context.scene.frame_current
+            prog_max = 1
+        else:
+            self.current_frame = stg.start_frame
+            self.end_frame = stg.end_frame
+            prog_max = stg.end_frame - stg.start_frame + 1                
+        
+        # create the required material
+        c_mat = stl.cycles_material
+        c_mat = bpy.data.materials[c_mat] if c_mat in bpy.data.materials else None
+        if ((c_mat is None) or (not stg.keep_settings)) and stg.create_material:
+            c_mat = Smoke2CyclesImportMaterialGenerator.generate_material(stg.material_type)
+            stl.cycles_material = c_mat.name
+        
+        # generate cycles domain cube if required
+        c_dom = stl.cycles_domain_obj        
+        c_dom = bpy.data.objects[c_dom] if c_dom in bpy.data.objects else None
+        ao = context.scene.objects.active
+        try:
+            if ((c_dom is None) or (not stg.keep_settings)) and stg.create_domain_cube:
+                # create a default cube as domain
+                bpy.ops.mesh.primitive_cube_add(layers= \
+                    tuple([i == stg.domain_cube_layer for i in range(1,21)]) )
+                c_dom = context.object
+                c_dom.name = "CyclesSmokeDom"
+                c_dom.matrix_world = mu.Matrix.Identity(4)
                               
-        return {'FINISHED'}
+                stl.cycles_domain_obj = c_dom.name                    
+
+            if not ((c_mat is None) or (c_dom is None)) :
+                if stg.create_material:
+                    # assign the correct material
+                    if len(c_dom.material_slots) == 0:
+                        bpy.ops.object.material_slot_add()
+                    c_dom.material_slots[0].material = c_mat    
+        finally:
+            context.scene.objects.active = ao
+                            
+                
+        # determine the right texture base filename:
+        basename = ""
+        if not c_dom is None:
+            basename = stl.texture_filename_base
+        if (not stg.keep_settings) or (basename == ""):
+            basename = stg.texture_filename_base
+            stl.texture_filename_base = basename
+
+        # progress indicator
+        self.progr = 0        
+        context.window_manager.progress_begin(0, prog_max * 100) # strange mapping to 0 to 9999                       
+        
+        context.window_manager.modal_handler_add(self)           
+        return {'RUNNING_MODAL'}
     
     def invoke(self, context, event):
         # copy the settings for correct redo operations
@@ -285,8 +350,10 @@ class VIEW3D_PT_Smoke2Cycles(bpy.types.Panel):
             
             cols.prop(s2cp, "current_frame")
             if not s2cp.current_frame:
-                cols.prop(s2cp, "start_frame")
-                cols.prop(s2cp, "end_frame")  
+                r_1 = cols.row(align=True)
+                r_1.alignment = 'EXPAND'
+                r_1.prop(s2cp, "start_frame")
+                r_1.prop(s2cp, "end_frame")  
             cols.prop(s2cp, "export_texture")  
             if s2cp.export_texture:
                 cols.prop(s2cp, "texture_filename_base")
@@ -296,7 +363,7 @@ class VIEW3D_PT_Smoke2Cycles(bpy.types.Panel):
             cols.prop(s2cp, "create_domain_cube")
             if s2cp.create_domain_cube:
                 cols.prop(s2cp, "domain_cube_layer")
-            
+            cols.prop(s2cp, "update_key_frames")
             # ----
             cols = layout.box().column()
             cols.label("Keep empty for the first run", icon='INFO')

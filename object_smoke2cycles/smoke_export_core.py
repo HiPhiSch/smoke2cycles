@@ -37,6 +37,17 @@ import gc
 import struct
 import mathutils as mu
 
+# exception classes
+class EUnsuportedPlatform(Exception):
+    pass
+class ELoadCompressionLibraryFailed(Exception):
+    pass
+class ENoDomain(Exception):
+    pass
+class ENotBaked(Exception):
+    pass
+    
+
 # utility function:
 def is_smoke_domain(obj):
     """Determine if an object is a smoke domain object"""
@@ -80,7 +91,7 @@ class LZx_Reader(object):
         elif os_type == "darwin":
             os_type = "mac"
         else:
-            raise Exception("Platform type: %s not supported!" % os_type)
+            raise EUnsupportedPlatform("Platform type: %s not supported!" % os_type)
         
         arch = "x86"
         if len(pl_split) > 1:
@@ -120,7 +131,10 @@ class LZx_Reader(object):
         if not lib in cls.dlls:
             cls.dlls[lib] = None
             
+            print ("initializing %s" % lib)
+            
             for dll_path in cls.search_path_iter(lib):
+                print ("...trying: %s" % dll_path)
                 try:
                     dll = ct.cdll.LoadLibrary(dll_path)
                     cls.dlls[lib] = dll
@@ -141,7 +155,7 @@ class LZx_Reader(object):
         dll = cls.get_lzx(lib)
         
         if dll is None:
-            raise Exception("Could not load %s library!" % lib)
+            raise ELoadCompressionLibraryFailed("Could not load %s library!" % lib)
 
         # create buffer
         out_buffer = (ct.c_float * no_floats)()
@@ -186,7 +200,7 @@ class SmokeExporter(object):
             bpy.context.scene
             domain = self.get_smoke_domain(domain_obj)
             if domain is None:
-                raise Exception("Not a valid smoke domain object!")                    
+                raise ENoDomain("Not a valid smoke domain object!")                    
             
             self.__smokecache = domain.point_cache
             self.__is_high_res = domain.use_high_resolution
@@ -360,7 +374,7 @@ class SmokeExporter(object):
         
         # check for bake
         if not smokecache.is_baked:
-            raise Exception("Export error: bake first!")
+            raise ENotBaked("Export error: bake first!")
             
         # determine binary file name
         cachefilepath = os.path.join(
