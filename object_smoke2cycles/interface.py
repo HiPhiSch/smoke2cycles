@@ -162,7 +162,7 @@ class OBJECT_OT_smoke2cycles(bpy.types.Operator):
         bpy.context.window_manager.progress_update(self.progr) 
         self.progr += 1
         
-        # material, domain, and basename from local object
+        # material, domain, and name base from local object
         c_mat = stl.cycles_material
         c_mat = bpy.data.materials[c_mat] if c_mat in bpy.data.materials else None
         c_dom = stl.cycles_domain_obj
@@ -203,14 +203,14 @@ class OBJECT_OT_smoke2cycles(bpy.types.Operator):
                     if (basename != "") and ("TextureFilenameBase" in n.inputs):
                         n.inputs["TextureFilenameBase"].default_value = basename
                 
-                
-                if "S2C_FIRE_TEMP" in nodes:
-                    n = nodes["S2C_FIRE_TEMP"]
-                    
-                    if "LowTemp" in n.inputs:
-                        n.inputs["LowTemp"].default_value = sm_exp.flame_temp_span[0]
-                    if "HighTemp" in n.inputs:
-                        n.inputs["HighTemp"].default_value = sm_exp.flame_temp_span[1]         
+                # This does not seem to be correct
+                # if "S2C_FIRE_TEMP" in nodes:
+                #    n = nodes["S2C_FIRE_TEMP"]
+                #    
+                #    if "LowTemp" in n.inputs:
+                #        n.inputs["LowTemp"].default_value = sm_exp.flame_temp_span[0]
+                #    if "HighTemp" in n.inputs:
+                #        n.inputs["HighTemp"].default_value = sm_exp.flame_temp_span[1]         
                         
             # update the key frames
             if stg.update_key_frames:

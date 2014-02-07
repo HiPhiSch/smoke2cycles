@@ -33,11 +33,12 @@ class Smoke2CyclesScriptProperty(bpy.types.PropertyGroup):
     script_id = bpy.props.IntProperty(name="Script ID", min=-1, default=-1)
 
 class Smoke2CyclesOSLScriptProvider(object):    
-    import_script_id = 1
+    import_script_id = 2
     import_script = \
     """// Author: HiPhiSch
 // version 0.4
 // changes:
+// v 0.5 - Added XOR output
 // v 0.4 - Flame support, EXR, embedded in addon
 // v 0.3 - Bugfix: y mirror
 // v 0.2 - z interpolation
@@ -53,7 +54,8 @@ shader smoke_vol_texture(
     int Divisions = 32,
     int EnableZInterp = 1,
     output float SmokeDensity = 0.0,
-    output float FireDensity = 0.0
+    output float FireDensity = 0.0,
+    output float SmokeXorFire = 1.0
 )
 {
     // outside of [-1,1] cube?
@@ -100,6 +102,8 @@ shader smoke_vol_texture(
     
     SmokeDensity = smoke_fire_tex[0];
     FireDensity = smoke_fire_tex[1];
+    
+    SmokeXorFire = (SmokeDensity != 0.0) ^ (FireDensity != 0.0);
 }
 """
     
@@ -110,13 +114,13 @@ shader smoke_vol_texture(
 
 shader tempature_remap(
     float FireDensity = 0.0,
-    float LowTemp = 1250.0,
-    float HighTemp = 1750.0,
+    float LowTemp = 1500.0,
+    float HighTemp = 4500.0,
     output float Temp = 0.0)
 {
     Temp = (HighTemp - LowTemp) * FireDensity + LowTemp;
 }"""
-    temperature_script_id = 1001
+    temperature_script_id = 1002
     scripts = {
         'IMPORT': (import_script_id, import_script, "Smoke2CyclesImpScr.osl") ,
         'TEMPERATURE': (temperature_script_id, temperature_script, "Smoke2CyclesTempRemap.osl")
@@ -132,7 +136,7 @@ class NodeLayouter(object):
         self.y_margin = 100.0
               
     def add(self, nodes, y_offset=0.0):
-        """Add one or more nodes to the right of the setup"""
+        """Add one or more nodes to the right of the current node setup"""
         if type(nodes) in (tuple, list):
             # add node
             if len(nodes) == 0:
@@ -228,55 +232,97 @@ class Smoke2CyclesImportMaterialGenerator(object):
             input_nodes[1].label = "Smoke2Cycles - Import"
             
             # setup converter part
-            nodes = [[], []]
-            sm_offs = [0, 0]
+            nodes = [[], [], []]
+            sm_offs = [0, 0, 0]
             if mat_type in ('SMOKE', 'SMOKE_FIRE'):
-                nodes[1].append("ShaderNodeMath")
+                if mat_type == 'SMOKE_FIRE':
+                    nodes[0].append("ShaderNodeMath")
+                    nodes[0].append("ShaderNodeValue")
+                    nodes[1].append("ShaderNodeMath")
+                    nodes[1].append("ShaderNodeMath")
+                    nodes[1].append("YSPACER_400")
+                    sm_offs[1] -= 1 # compensate for spacer as fake node
+                nodes[2].append("ShaderNodeMath")
+                if mat_type == 'SMOKE_FIRE':
+                    nodes[2].append("ShaderNodeMath")
                 
-                sm_offs = [len(n) for n in nodes]
+                sm_offs = [so + len(n) for so,n in zip(sm_offs, nodes)]
                 
             if mat_type in ('FIRE', 'SMOKE_FIRE'):
-                nodes[0].append('YSPACER_300')
+                if mat_type == 'FIRE':
+                    nodes[0].append("YSPACER_300")
                 nodes[0].append("ShaderNodeScript")
+                if mat_type == 'SMOKE_FIRE':
+                    nodes[0].append("YSPACER_250")
 
-                nodes[1].append("ShaderNodeMath")
-                nodes[1].append("ShaderNodeBlackbody")
+                nodes[2].append("ShaderNodeMath")
+                nodes[2].append("ShaderNodeBlackbody")
             
             # create nodes    
             converter_nodes = [nl.add(n) for n in nodes]
             
             if mat_type in ('SMOKE', 'SMOKE_FIRE'):
-                # set up math node
-                converter_nodes[1][0].operation = 'MULTIPLY'
-                converter_nodes[1][0].inputs[1].default_value = 10.0
-                
-                # link node
-                n_tr.links.new(input_nodes[-1].outputs["SmokeDensity"], converter_nodes[1][0].inputs[0])
-                
-                sm_dens = converter_nodes[1][0].outputs["Value"]
-                converter_nodes[1][0].label = "Smoke Density Scaler"
+                converter_nodes[2][0].operation = 'MULTIPLY'
+                if mat_type == 'SMOKE':
+                    # set up math node
+                    converter_nodes[2][0].inputs[1].default_value = 10.0
+                    
+                    # link node
+                    n_tr.links.new(input_nodes[-1].outputs["SmokeDensity"], converter_nodes[2][0].inputs[0])
+                    
+                sm_dens_abs = converter_nodes[2][0].outputs["Value"]
+                sm_dens_sct = sm_dens_abs
+                converter_nodes[2][0].label = "Smoke Density Scaler"
                 
             if mat_type in ('FIRE', 'SMOKE_FIRE'):                
                 # setup math node
-                converter_nodes[1][0 + sm_offs[1]].operation = 'MULTIPLY'
-                converter_nodes[1][0 + sm_offs[1]].inputs[1].default_value = 5.0
+                converter_nodes[2][0 + sm_offs[2]].operation = 'MULTIPLY'
+                converter_nodes[2][0 + sm_offs[2]].inputs[1].default_value = 5.0
 
                 # load script
                 converter_nodes[0][0 + sm_offs[0]].script = osl_temp_remap
                                 
                 # link nodes
                 n_tr.links.new(input_nodes[-1].outputs["FireDensity"], converter_nodes[0][0 + sm_offs[0]].inputs["FireDensity"])
-                n_tr.links.new(input_nodes[-1].outputs["FireDensity"], converter_nodes[1][0 + sm_offs[1]].inputs[0])
-                n_tr.links.new(converter_nodes[0][0 + sm_offs[0]].outputs["Temp"], converter_nodes[1][1 + sm_offs[1]].inputs["Temperature"])
+                n_tr.links.new(input_nodes[-1].outputs["FireDensity"], converter_nodes[2][0 + sm_offs[2]].inputs[0])
+                n_tr.links.new(converter_nodes[0][0 + sm_offs[0]].outputs["Temp"], converter_nodes[2][1 + sm_offs[2]].inputs["Temperature"])
                 
                 # name
                 converter_nodes[0][0 + sm_offs[0]].name = "S2C_FIRE_TEMP"
                 
-                fr_dens = converter_nodes[1][0 + sm_offs[1]].outputs["Value"]
-                fr_color = converter_nodes[1][1 + sm_offs[1]].outputs["Color"]
+                fr_dens = converter_nodes[2][0 + sm_offs[2]].outputs["Value"]
+                fr_color = converter_nodes[2][1 + sm_offs[2]].outputs["Color"]
                 
-                converter_nodes[1][0 + sm_offs[1]].label = "Fire Density Scale"
+                converter_nodes[2][0 + sm_offs[2]].label = "Fire Density Scale"
                 converter_nodes[0][0 + sm_offs[0]].label = "Smoke2Cycles - Temperature Remap"
+            
+            # avoid scattering on smoke at self casted fire    
+            if mat_type == 'SMOKE_FIRE':
+                # setup math nodes / value node
+                converter_nodes[0][0].operation = 'SUBTRACT'
+                converter_nodes[0][0].inputs[0].default_value = 2.0                
+                converter_nodes[1][0].operation = 'MULTIPLY'
+                converter_nodes[1][1].operation = 'MULTIPLY'
+                converter_nodes[2][1].operation = 'MULTIPLY'
+                converter_nodes[0][1].outputs[0].default_value = 6.0
+                                
+                # link nodes
+                n_tr.links.new(input_nodes[-1].outputs["SmokeDensity"], converter_nodes[1][0].inputs[0])
+                n_tr.links.new(input_nodes[-1].outputs["SmokeDensity"], converter_nodes[1][1].inputs[0])
+                n_tr.links.new(input_nodes[-1].outputs["SmokeXorFire"], converter_nodes[0][0].inputs[1])
+                n_tr.links.new(input_nodes[-1].outputs["SmokeXorFire"], converter_nodes[1][1].inputs[1])
+                n_tr.links.new(converter_nodes[0][0].outputs["Value"], converter_nodes[1][0].inputs[1])
+                n_tr.links.new(converter_nodes[0][1].outputs["Value"], converter_nodes[2][0].inputs[1])
+                n_tr.links.new(converter_nodes[0][1].outputs["Value"], converter_nodes[2][1].inputs[1])
+                n_tr.links.new(converter_nodes[1][0].outputs["Value"], converter_nodes[2][0].inputs[0])
+                n_tr.links.new(converter_nodes[1][1].outputs["Value"], converter_nodes[2][1].inputs[0])
+                
+                # label node
+                converter_nodes[2][1].label = "Smoke Scatter Density Scale"
+                converter_nodes[0][1].label = "Smoke Base Density"
+                
+                # use modified scattering output
+                sm_dens_sct = converter_nodes[2][1].outputs["Value"]
             
             # setup shader part
             nodes = [[],[]]
@@ -299,12 +345,10 @@ class Smoke2CyclesImportMaterialGenerator(object):
             
             if mat_type in ('SMOKE', 'SMOKE_FIRE'):
                 # create links
-                n_tr.links.new(sm_dens, shader_nodes[0][0].inputs["Density"])   
-                n_tr.links.new(sm_dens, shader_nodes[0][1].inputs["Density"])  
+                n_tr.links.new(sm_dens_abs, shader_nodes[0][0].inputs["Density"])   
+                n_tr.links.new(sm_dens_sct, shader_nodes[0][1].inputs["Density"])  
                 n_tr.links.new(shader_nodes[0][0].outputs["Volume"], shader_nodes[1][0].inputs[0])
                 n_tr.links.new(shader_nodes[0][1].outputs["Volume"], shader_nodes[1][0].inputs[1])
-                
-                shader_nodes[0][1].inputs["Anisotropy"].default_value = 0.85
                 
                 sm_shader = shader_nodes[1][0].outputs["Shader"]
             
